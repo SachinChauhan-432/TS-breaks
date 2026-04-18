@@ -27,6 +27,7 @@ function buildSummary(rows) {
   const productCounts = {};
   const errorGroups = {};
   const firmDetails = {};
+  const productDetails = {};
 
   for (const r of rows) {
     const errFull = (r["Error"] || "").trim();
@@ -41,9 +42,12 @@ function buildSummary(rows) {
 
     const prod = r["Product Type"] || "Unknown";
     productCounts[prod] = (productCounts[prod] || 0) + 1;
+    
+    if (!productDetails[prod]) productDetails[prod] = [];
+    productDetails[prod].push(r);
   }
 
-  return { total, errorGroups, firmCounts, productCounts, firmDetails };
+  return { total, errorGroups, firmCounts, productCounts, firmDetails, productDetails };
 }
 
 function formatReportDate(dateObj) {
@@ -215,6 +219,60 @@ function FirmDetailsModal({ firmName, rows, onClose }) {
   );
 }
 
+function ProductDetailsModal({ productName, rows, onClose }) {
+  if (!productName) return null;
+  
+  const firmCounts = {};
+  rows.forEach(r => {
+    const firm = (r["Party Firm Name"] || "Unknown").trim();
+    firmCounts[firm] = (firmCounts[firm] || 0) + 1;
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-300" onClick={onClose} />
+      <div className="bg-zinc-900 rounded-3xl shadow-2xl shadow-pink-900/20 border border-zinc-800 w-full max-w-2xl max-h-[85vh] flex flex-col relative z-10 animate-in fade-in zoom-in-95 duration-300">
+        <div className="p-6 border-b border-zinc-800 flex justify-between items-start bg-zinc-900/50 backdrop-blur-md rounded-t-3xl z-20">
+          <div>
+            <h2 className="text-2xl font-black text-white tracking-tight">{productName}</h2>
+            <p className="text-sm font-medium text-zinc-400 mt-1">{rows.length} Total Fails</p>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 flex items-center justify-center rounded-full bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white transition-colors">✕</button>
+        </div>
+        <div className="p-6 overflow-y-auto">
+          <div className="space-y-6">
+            {Object.entries(firmCounts).sort((a,b)=>b[1]-a[1]).map(([firm, count], idx) => {
+              const specificRows = rows.filter(r => (r["Party Firm Name"] || "Unknown").trim() === firm);
+              return (
+                <div key={idx} className="bg-zinc-950/50 rounded-2xl p-5 border border-zinc-800">
+                  <div className="flex justify-between items-start mb-4 gap-4">
+                    <h3 className="font-bold text-white text-sm leading-snug">{firm}</h3>
+                    <Badge color="gray">{count}</Badge>
+                  </div>
+                  <div className="space-y-3">
+                    {specificRows.map((r, i) => (
+                      <div key={i} className="bg-zinc-900 rounded-xl p-4 text-xs border border-zinc-800 shadow-sm flex flex-col gap-2 hover:border-pink-500/30 transition-colors">
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-500 font-medium uppercase tracking-wider">TRN</span>
+                          <span className="font-mono font-bold text-zinc-300">{r["Party Reference Number"] || "-"}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-zinc-500 font-medium uppercase tracking-wider">Error</span>
+                          <span className="font-semibold text-pink-400 bg-pink-500/10 px-2 py-0.5 rounded text-right max-w-[60%] truncate" title={r["Error"]}>{r["Error"] || "-"}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -227,11 +285,12 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [activeTab, setActiveTab] = useState("preview");
   const [selectedFirm, setSelectedFirm] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   const saveWebhook = (v) => { setWebhook(v); try { localStorage.setItem(STORAGE_KEY, v); } catch {} };
 
   const processFile = async (f) => {
-    setFile(f); setSummary(null); setMessage(""); setStatus(null); setSelectedFirm(null);
+    setFile(f); setSummary(null); setMessage(""); setStatus(null); setSelectedFirm(null); setSelectedProduct(null);
     try {
       const rows = await parseExcel(f);
       const s = buildSummary(rows);
@@ -326,18 +385,24 @@ export default function App() {
             <Card className="p-7">
               <div className="grid md:grid-cols-2 gap-10">
                 <BreakdownBar title="By Party Firm" icon="🏦" data={summary.firmCounts} onRowClick={(firm) => setSelectedFirm(firm)} />
-                <BreakdownBar title="By Product Type" icon="📦" data={summary.productCounts} />
+                <BreakdownBar title="By Product Type" icon="📦" data={summary.productCounts} onRowClick={(prod) => setSelectedProduct(prod)} />
               </div>
             </Card>
 
             <Card className="overflow-hidden">
-              <div className="flex border-b border-zinc-800 bg-zinc-950/50">
-                {[["preview","💬 Preview"],["edit","✏️ Edit"]].map(([tab, label]) => (
-                  <button key={tab} onClick={() => setActiveTab(tab)}
-                    className={`px-5 py-3 text-sm font-medium transition-colors ${activeTab === tab ? "border-b-2 border-pink-500 text-pink-400" : "text-zinc-500 hover:text-zinc-300"}`}>
-                    {label}
-                  </button>
-                ))}
+              <div className="flex border-b border-zinc-800 bg-zinc-950/50 justify-between items-center pr-2">
+                <div className="flex">
+                  {[["preview","💬 Preview"],["edit","✏️ Edit"]].map(([tab, label]) => (
+                    <button key={tab} onClick={() => setActiveTab(tab)}
+                      className={`px-5 py-3 text-sm font-medium transition-colors ${activeTab === tab ? "border-b-2 border-pink-500 text-pink-400" : "text-zinc-500 hover:text-zinc-300"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => { navigator.clipboard.writeText(message); setStatus({ type: "success", text: "✅ Message copied to clipboard!" }); }}
+                  className="px-4 py-1.5 text-xs font-bold bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg transition-colors flex items-center gap-2">
+                  📋 Copy Text
+                </button>
               </div>
               <div className="p-5">
                 {activeTab === "preview"
@@ -373,6 +438,13 @@ export default function App() {
           firmName={selectedFirm} 
           rows={summary.firmDetails[selectedFirm]} 
           onClose={() => setSelectedFirm(null)} 
+        />
+      )}
+      {selectedProduct && summary?.productDetails[selectedProduct] && (
+        <ProductDetailsModal 
+          productName={selectedProduct} 
+          rows={summary.productDetails[selectedProduct]} 
+          onClose={() => setSelectedProduct(null)} 
         />
       )}
     </div>
